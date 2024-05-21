@@ -2,7 +2,7 @@
 
 ## Introduction
 ------------
-This is an application where you can upload multiple pdfs at once and ask questions across documents. It will return you the most closest answer along with pinpointing the source of information too. 
+A simple application to upload multiple pdfs at once and ask questions across them. It will return you the most closest answer along with pinpointing the source of information too. 
 
 ## High-level overview
 ------------
