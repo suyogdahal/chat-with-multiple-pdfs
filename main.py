@@ -2,17 +2,16 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 import streamlit as st
-from langchain.chains import conversational_retrieval
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain.memory import ConversationBufferMemory
 from langchain.schema import Document
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from loguru import logger
 from PyPDF2 import PdfReader
-
-EMBEDDINGS = OpenAIEmbeddings(show_progress_bar=True)
-CLIENT = ChatOpenAI()
 
 
 @dataclass
@@ -26,8 +25,7 @@ class PdfInfo:
     def text(self):
         return " ".join(self.page_info.values())
 
-    @property
-    def as_documents(self):
+    def as_documents(self) -> List[Document]:
         """breaks a pdffile into multiple langchain docs with proper metadata"""
         documents = []
         for pg_num, text in self.page_info.items():
@@ -47,7 +45,7 @@ class PdfInfo:
             _text = page.extract_text()
             page_info[pg_num] = _text
 
-        return cls(doc_name=path, page_info=page_info)
+        return cls(doc_name=path.name, page_info=page_info)
 
 
 def get_pdf_infos(pdf_docs: List[str]) -> List[PdfInfo]:
@@ -74,18 +72,45 @@ def get_splitted_docs(documents: List[Document]):
 
 
 def get_vectorstore(documents: List[Document]):
+    embeddings = OpenAIEmbeddings(show_progress_bar=True)
     logger.info("Creating Embeddings")
-    vectorstore = FAISS.from_documents(documents=documents, embedding=EMBEDDINGS)
+    vectorstore = FAISS.from_documents(documents=documents, embedding=embeddings)
     logger.info("Sucessfully created a vectorstore")
     return vectorstore
 
 
 def get_chain(vectorstore):
     llm = ChatOpenAI(model="gpt-4o")
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-    conversation_chain = conversational_retrieval(llm=llm, retriever=vectorstore.as_retriever(), memory=memory)
-    logger.debug(f"output: {conversation_chain}")
-    return conversation_chain
+    # memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    prompt = ChatPromptTemplate.from_template(
+        """Answer the following question based only on the provided context:
+
+    <context>
+    {context}
+    </context>
+
+    Question: {input}"""
+    )
+
+    document_chain = create_stuff_documents_chain(llm, prompt)
+    retriever = vectorstore.as_retriever()
+    retrieval_chain = create_retrieval_chain(retriever, document_chain)
+
+    return retrieval_chain
+
+
+def format_response(response: dict) -> str:
+    answer = response.get("answer", "")
+    if not answer:
+        return ""
+    contexts = response.get("context", {})
+
+    for idx, context in enumerate(contexts):
+        doc_name = context.metadata["doc_name"]
+        page_number = context.metadata["page_num"]
+        # Append the metadata to the answer string
+        answer += f"\n\n - Source ({idx+1}) - Document: {doc_name}, Page number: {page_number}"
+    return answer
 
 
 def st_file_handler():
@@ -126,6 +151,9 @@ def init_app():
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    if "vectorstore" not in st.session_state:
+        st.session_state.vectorstore = None
+
 
 def st_display_message_handler():
     for message in st.session_state.messages:
@@ -146,13 +174,10 @@ def main():
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            stream = CLIENT.chat.completions.create(
-                model=st.session_state["openai_model"],
-                messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
-                stream=True,
-            )
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+            response = st.session_state.chain.invoke({"input": prompt})
+            answer = format_response(response)
+            st.markdown(answer)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
 
 if __name__ == "__main__":
