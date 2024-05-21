@@ -1,7 +1,5 @@
 # Chat With Multiple Pdfs
 
-This is work in progress, I'll update the readme as this becomes better.
-
 ## Introduction
 ------------
 This is an application where you can upload multiple pdfs at once and ask questions across documents. It will return you the most closest answer along with pinpointing the source of information too. 
