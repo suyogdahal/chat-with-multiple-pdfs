@@ -1,0 +1,4 @@
+[server]
+port = 8080
+maxUploadSize = 5
+headless = true
