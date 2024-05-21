@@ -1,67 +1,25 @@
 import streamlit as st
-from langchain.chains import conversational_retrieval
-from langchain.memory import ConversationBufferMemory
-from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from loguru import logger
-from PyPDF2 import PdfReader
 
-EMBEDDINGS = OpenAIEmbeddings(show_progress_bar=True)
-
-
-def get_pdf_text(pdf_docs):
-    text = ""
-    for pdf in pdf_docs:
-        logger.info(f"Loading {pdf}")
-        pdf_reader = PdfReader(pdf)
-        for page in pdf_reader.pages:
-            _text = page.extract_text()
-            text += _text
-            logger.info(f"Loaded total {len(_text)} chars")
-    return text
+from helpers.langchain_helpers import get_chain, get_vectorstore
+from helpers.misc import format_response
+from helpers.pdf_helpers import get_documents, get_pdf_infos, get_splitted_docs
 
 
-def get_text_chunks(text):
-    logger.info("Splitting into chunks ...")
-    text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=200, length_function=len)
-    chunks = text_splitter.split_text(text)
-    logger.info(f"Splitted into {len(chunks)} chunks.")
-    return chunks
-
-
-def get_vectorstore(text_chunks):
-    logger.info("Creating Embeddings")
-    vectorstore = FAISS.from_texts(texts=text_chunks, embedding=EMBEDDINGS)
-    logger.info("Sucessfully created a vectorstore")
-    vectorstore.save_local("faiss_index")
-    return vectorstore
-
-
-def get_chain(vectorstore):
-    llm = ChatOpenAI(model="gpt-4o")
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-    conversation_chain = conversational_retrieval(llm=llm, retriever=vectorstore.as_retriever(), memory=memory)
-    logger.debug(f"output: {conversation_chain}")
-    return conversation_chain
-
-
-def user_input(user_question: str, chain):
-    docs = st.session_state.vectorstore.similarity_search(user_question)
-    response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
-    logger.debug(f"output {response['output_text']}")
-    st.write("Reply: ", response["output_text"])
-
-
-def main():
-    """All streamlit related stuffs"""
-    st.header("Chat with your PDF documents :open_file_folder:")
+def init_app():
+    """All initialization stuffs"""
     st.set_page_config(page_title="Chat with multiple PDFs", page_icon=":open_file_folder:")
+    st.header("Chat with your PDF documents :open_file_folder:")
 
-    # initialization
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
+    if "vectorstore" not in st.session_state:
+        st.session_state.vectorstore = None
+
+
+def st_file_handler():
+    """Handles any uploaded files and updates st session's vectorstore and chain"""
     with st.sidebar:
         st.subheader("Your documents")
         pdf_docs = st.file_uploader(
@@ -75,22 +33,44 @@ def main():
                 return
             with st.spinner("Processing"):
                 logger.info(f"Processing {pdf_docs}")
-                raw_text = get_pdf_text(pdf_docs)
-                if not raw_text:
-                    st.error(
-                        "Unable to extract text. Please provide a digital PDF. Our service does not currently support OCR for non-digital PDF documents."
-                    )
-                    return
+                pdf_infos = get_pdf_infos(pdf_docs)
+                documents = get_documents(pdf_infos)
+                documents_chunks = get_splitted_docs(documents=documents)
 
-                text_chunks = get_text_chunks(raw_text)
+                if st.session_state.vectorstore is None:
+                    logger.debug("No vectorstore found, creating a new one ...")
+                    vectorstore = get_vectorstore(documents)
+                    st.session_state.vectorstore = vectorstore
+                else:
+                    logger.debug("Vectorstore exists, adding new docs to it")
+                    _ = st.session_state.vectorstore.add_documents(documents_chunks)
+                chain = get_chain(st.session_state.vectorstore)
+                st.session_state.chain = chain
 
-                if "vectorstore" not in st.session_state:
-                    st.session_state.vectorstore = None
-                    # create vector store
-                    vectorstore = get_vectorstore(text_chunks)
 
-                # create conversation chain
-                chain = get_conversation_chain(vectorstore)
+def st_display_message_handler():
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+
+def main():
+    """All streamlit related stuffs"""
+
+    init_app()
+    st_file_handler()
+    st_display_message_handler()
+
+    if prompt := st.chat_input("Ask question about your document(s) ..."):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            response = st.session_state.chain.invoke({"input": prompt})
+            answer = format_response(response)
+            st.markdown(answer)
+        st.session_state.messages.append({"role": "assistant", "content": answer})
 
 
 if __name__ == "__main__":
