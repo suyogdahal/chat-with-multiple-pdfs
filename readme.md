@@ -4,6 +4,8 @@
 ------------
 A simple application to upload multiple pdfs at once and ask questions across them. It will return you the most closest answer along with pinpointing the source of information too. 
 
+![](assets/demo.gif)
+
 ## High-level overview
 ------------
 
