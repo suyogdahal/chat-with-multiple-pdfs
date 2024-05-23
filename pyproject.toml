@@ -6,7 +6,7 @@ authors = ["suyogdahal <suyogdahal46@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.10"
 streamlit = "^1.34.0"
 uvicorn = "^0.29.0"
 langchain = "^0.2.0"
