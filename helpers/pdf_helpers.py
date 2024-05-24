@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 
 from langchain.schema import Document
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from loguru import logger
 from PyPDF2 import PdfReader
 
@@ -58,7 +58,7 @@ def get_documents(pdf_infos: List[PdfInfo]) -> List[Document]:
 
 def get_splitted_docs(documents: List[Document]):
     logger.info("Splitting the documents into chunks ...")
-    text_splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=200, length_function=len)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, length_function=len)
     chunks = text_splitter.split_documents(documents)
     logger.info(f"Splitted into {len(chunks)} chunks.")
     return chunks
